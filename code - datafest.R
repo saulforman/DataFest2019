@@ -153,6 +153,7 @@ append_games = append_games %>%
             GOD = max(GOD))
 append_scale = append_games
 append_scale[,3:18] = scale(append_scale[,3:18], center = TRUE, scale = TRUE)
+
 ## Create and Plot Covariance Matrix
 cormat = round(cor(append_scale[,3:18]),2)
 library(reshape2)
@@ -162,6 +163,7 @@ library(ggplot2)
 ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
   geom_tile() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
 ## Use PCA on Outcome Variables
 out_pca = prcomp(append_scale[,3:18])
 summary(out_pca)
@@ -246,6 +248,7 @@ data = rpe_train %>% left_join(append_scale2, by = c('PlayerID', 'Date')) %>%
   left_join(outcomes_t1, by = c('PlayerID', 'Date')) %>%
   filter(is.na(pca) != TRUE)
 
+## Roughfix NAs for random forest
 X = as.matrix(data[,3:22])
 rf = as.data.frame(rfImpute(X, data$pca))
 
@@ -260,176 +263,6 @@ model = randomForest(y ~., data = training, method = 'rf', trControl = ctrl)
 testing$predicted = predict(model, newdata=testing)
 varImpPlot(model, type=2)
 save(model, file = "mymodel.rda")
-
-
-
-##### CREATE SHINY APP
-library(shiny)
-library(LiblineaR)
-
-load("mymodel.rda")
-
-server = shinyServer(function(input, output) {
-  
-  options(shiny.maxRequestSize = 800*1024^2)   # This is a number which specifies the maximum web request size, 
-  # which serves as a size limit for file uploads. 
-  # If unset, the maximum request size defaults to 5MB.
-  # The value I have put here is 80MB
-  
-  
-  
-  
-  
-  
-  predictions<-reactive({
-    
-    date <- input$Date
-    
-    if (is.null(inFile)){
-      return(NULL)
-    }else{
-      withProgress(message = 'Predictions in progress. Please wait ...', {
-        input_data =  data %>%
-          filter(Date = date)
-        X = as.matrix(input_data[,3:22])
-        rf = as.data.frame(rfImpute(X, input_data$pca))
-        prediction = predict(my_model, rf)
-        
-        input_data_with_prediction = cbind(input_data, prediction)
-        input_data_with_prediction
-        
-      })
-    }
-  })
-  
-  output$mytable1 <- DT::renderDataTable({
-    DT::datatable(data[,c(7,9,21,6,5), drop = FALSE])
-  })
-  
-  output$sample_prediction_heading = renderUI({  # show only if data has been uploaded
-
-    if (is.null(input_data)){
-      return(NULL)
-    }else{
-      tags$h4('Sample predictions')
-    }
-  })
-  
-  output$sample_predictions = renderTable({   # the last 6 rows to show
-    pred = predictions()
-    head(pred)
-    
-  })
-  
-  
-  output$plot_predictions = renderPlot({   # the last 6 rows to show
-    pred = predictions()
-    
-    
-  })
-  
-  
-  # Downloadable csv of predictions ----
-  
-  output$downloadData <- downloadHandler(
-    filename = function() {
-      paste("input_data_with_predictions", ".csv", sep = "")
-    },
-    content = function(file) {
-      write.csv(predictions(), file, row.names = FALSE)
-    })
-  
-})
-
-library(shinydashboard)
-library(shinythemes)
-
-ui = dashboardPage(skin="black",
-              dashboardHeader(title=tags$em("Fatigue Prediction App", style="text-align:center;color:#006600;font-size:100%"),titleWidth = 800),
-              
-              dashboardSidebar(width = 250,
-                               sidebarMenu(
-                                 br(),
-                                 menuItem(tags$em("Download Predictions",style="font-size:100%"),icon=icon("download"),tabName="download"),
-                                 selectInput(
-                                   inputId = "Date",
-                                   label = "Date",
-                                   choices = data$Date
-                                 )
-                                 
-                               )
-              ),
-              
-              dashboardBody(
-                tabItems(
-                  tabItem(tabName="data",
-                          
-                          
-                          br(),
-                          br(),
-                          br(),
-                          br(),
-                          tags$h4("With this shiny prediction app, you can select a date to view estimated player fatigue.
-                                  The model is a Random Forest Regression that predicts how fatigued a player will be on a given
-                                  sliding scale from 0 to 100 on a given day based upon their biometric data from the previous day.",
-                                  style="font-size:100%"),
-                          
-                          
-                          br(),
-                          
-                          tags$h4("To predict using this model, select a Date from the Dropdown Menu.", style="font-size:100%"),
-                          
-                          tags$h4("Then, go to the", tags$span("Download Predictions",style="color:red"),
-                                  tags$span("section in the sidebar to  download the predictions."), style="font-size:100%"),
-                                 br(),
-                                 br(),
-                                 br(),
-                                 br()
-                          ),
-                          br()
-                          
-                          ),
-                  
-                  
-                  tabItem(tabName="download",
-                          fluidRow(
-                            br(),
-                            br(),
-                            br(),
-                            br(),
-                            column(width = 8,
-                                   tags$h4("After you select a Date, you can download the predictions in csv format by
-                                           clicking the button below.", 
-                                           style="font-size:100%"),
-                                   br(),
-                                   br()
-                            )),
-                          fluidRow(
-                            
-                            column(width = 7,
-                                   downloadButton("downloadData", em('Download Predictions',style="text-align:center;color:blue;font-size:150%")),
-                                   plotOutput('plot_predictions')
-                            ),
-                            column(width = 4,
-                                   uiOutput("sample_prediction_heading"),
-                                   tableOutput("sample_predictions")
-                            )
-                            
-                          ))
-                  ),
-              fluidPage(
-                title = 'Player Biometric & Fatigue Data',
-                  mainPanel(
-                    tabsetPanel(
-                      id = 'dataset',
-                      tabPanel('Fatigue', DT::dataTableOutput('mytable1'))
-                    )
-                  )
-                )
-              )
-            )
-
-shiny::shinyApp(ui, server)
 
 
 
